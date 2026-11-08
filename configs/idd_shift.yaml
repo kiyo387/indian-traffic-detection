@@ -1,0 +1,11 @@
+path: D:/DATA/idd_yolo
+train: images/train
+val: images/shift
+names:
+  0: car
+  1: motorcycle
+  2: rider
+  3: autorickshaw
+  4: bus
+  5: truck
+  6: person
