@@ -1,0 +1,25 @@
+{
+  "name": "smoke_shift",
+  "weights": "runs/detect/smoke/weights/best.pt",
+  "data": "configs/idd_shift.yaml",
+  "imgsz": 640,
+  "map50": 0.3284952429391866,
+  "map50_95": 0.22685135147284988,
+  "precision": 0.4254626655842482,
+  "recall": 0.36239875986660397,
+  "per_class_map50_95": {
+    "car": 0.5008313957380478,
+    "motorcycle": 0.2840720685977687,
+    "rider": 0.009553804820117171,
+    "autorickshaw": 0.002888041909748452,
+    "bus": 0.393055892922621,
+    "truck": 0.19839397090699645,
+    "person": 0.19916428541464948
+  },
+  "speed_ms_per_image": {
+    "preprocess": 0.66,
+    "inference": 1.87,
+    "loss": 0.0,
+    "postprocess": 2.51
+  }
+}
