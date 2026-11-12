@@ -17,7 +17,7 @@ Source data: `results/baseline_gt_matches.parquet` (67,300 GT boxes across 5,138
 | `0.5-2%` | 9,608 | 14.3% | 82.4% |
 | `>2%` | 8,309 | 12.3% | 93.6% |
 
-Boxes under 0.1% of the image account for 76.2% of all misses (26,225 of 34,416).
+Boxes under 0.1% of the image account for 76.2% of all misses (26,225 of 34,416), and 93.9% of all incorrectly matched boxes (34,302 of 36,530) are under 0.5%.
 
 ### Recall by crowding × size (is crowding an independent cause?)
 
@@ -43,7 +43,7 @@ For boxes ≥0.5% of the image, recall is flat across crowd levels (~0.82–0.94
 | `rider` | 0.08 | 0.35 | 0.61 | 0.77 | 0.90 |
 | `truck` | 0.02 | 0.14 | 0.37 | 0.67 | 0.90 |
 
-`person`'s terrible overall recall (0.31) is mostly a size effect: 57.4% of person boxes are under 0.1% of the image. Within a size bin, most classes look similar. The exceptions are **`bus` and `truck`**, which have ~20pp lower recall than `car`/`motorcycle` at the same size — suggesting a real class-level difficulty (possibly because they share visual features and get confused with each other; `wrong_class` is 8% for both).
+`person`'s terrible overall recall (0.31) is mostly a size effect: 57.4% of person boxes are under 0.1% of the image, though a modest gap vs `car` remains from 0.1% up (`0.56` vs `0.65`, `0.82` vs `0.88`, `0.86` vs `0.97`). The biggest outliers are **`bus` and `truck`**, which have ~20pp lower recall than `car`/`motorcycle`/`autorickshaw` at 0.1–0.5% and 0.5–2% (`0.37–0.38` and `0.67` vs `0.58–0.65` and `0.87–0.89`), with ≥303 boxes in every cell (`wrong_class` is 8% for both). Possible factors include `bus`/`truck` mutual confusion, truncation/occlusion on large vehicles, and dropped classes (`vehicle fallback` ~21k boxes, `caravan`, `trailer` left unlabeled as background).
 
 ### Class crosstab (row-normalized)
 
@@ -73,17 +73,17 @@ Overall: `hit` rose 45.7% → 52.4%, but `wrong_class` doubled 3.1% → 6.3%. Th
 
 ## Failure Modes
 
-**Failure mode 1: tiny distant objects (dominant)**
-Evidence: boxes under 0.05% of the image area (22,385 boxes, 33.3% of ground truth) are found just 7.3% of the time, vs 93.6% for boxes over 2%. Boxes under 0.1% account for 76.2% of all misses (26,225 of 34,416). Crowding amplifies this — the same tiny boxes drop from 20% recall in sparse images to 4% in crowded images — but for boxes ≥0.5%, crowding has no effect. The `conf=0.1` check confirms the model genuinely cannot see these objects (recall rises only to 12.8%).
+**Failure mode 1: small objects (dominant)**
+Evidence: 33.3% of ground-truth boxes (22,385) are under 0.05% of the image area and are found 7.3% of the time, against 82–94% for boxes over 0.5%. 93.9% of all incorrectly matched boxes (34,302 of 36,530) are under 0.5%. The `conf=0.1` check confirms the model genuinely cannot see these objects (recall rises only to 12.8% for `<0.05%` while `wrong_class` doubles 3.1% → 6.3%).
 Examples: `results/failures/highquality_16k__15-07-18-upload__2018-05-08_4-20-0-775835_leftImg8bit.jpg`, `results/failures/highquality_16k__HYD-2018-04-26_12-40-01__0005609.jpg`
-Hypothesis: raising `imgsz` from 640 to 1280 will partially recover these. Under 0.05% of a 1920×1080 frame is ~32×32 px; at `imgsz=640` that shrinks to ~11×11 px, at 1280 to ~21×21 px. Expect partial, not full, recovery. Alternatively, reporting metrics on boxes ≥0.1% of the image may be a better story for vehicle counting, where objects a few pixels wide far down the road may not matter.
+Hypothesis: a larger input size (`imgsz` 960 or 1280) recovers part of these, though not all, since a 0.05% box is ~11×11 pixels at 640 and ~21×21 at 1280. Alternatively, reporting metrics on boxes ≥0.1% alongside overall mAP better reflects vehicle counting where distant horizon pixels do not matter.
 
-**Failure mode 2: bus/truck class confusion**
-Evidence: `bus` and `truck` have 8% `wrong_class` rate each (vs 2–3% for other classes), and within the same size bins they have ~20pp lower recall than `car` or `motorcycle`. This is a real per-class difficulty, not a size artifact.
-Examples: `results/failures/highquality_16k__HYD-2018-04-26_13-40-01__0007741.jpg`, `results/failures/highquality_16k__15-07-18-upload__2018-05-31_11-2-8-340904_leftImg8bit.jpg`
-Hypothesis: a bigger model (`yolov8s`) with more capacity should reduce bus/truck confusion.
+**Failure mode 2: crowding amplifies small-object misses**
+Evidence: within the `<0.05%` bin recall falls from 0.20 (1–5 boxes) to 0.04 (40+ boxes), and within `0.05-0.1%` from 0.48 to 0.23. Above 0.5% there is no effect (`0.81–0.83` and `0.93–0.94` across all crowd levels). Note that the hand-sorted tally comes from the 20 worst images in `results/failures/` (all `highquality_16k`), so "15/15 contain tiny objects" reflects selection, not prevalence.
+Examples: `results/failures/highquality_16k__BLR-2018-05-31_10-49-32__2018-05-31_10-57-56-135029_leftImg8bit.jpg`, `results/failures/highquality_16k__15-07-18-upload__2018-05-08_5-3-32-770267_leftImg8bit.jpg`
+Hypothesis: higher resolution (`imgsz=1280`) and a larger model/tuned NMS will reduce small-object collapse in dense scenes, though within-bin size variation and box overlap among tiny objects may leave some gap.
 
-**Failure mode 3: possible label noise (minor)**
-Evidence: some images have tiny ground-truth boxes on upper-floor building areas. On manual inspection (cropped at full resolution), these turned out to be **real people on balconies**, not labeling errors — so this is actually correct annotation of genuinely difficult objects, not label noise. Noted here to explain why 3/15 failure images appeared to have spurious labels.
-Examples: `results/failures/highquality_16k__BLR-2018-06-19-06-21-44_part_47__0001013.jpg` (boxes 28, 29 — people on upper walkway)
-Hypothesis: no model fix needed; these are real objects that happen to be very small (covered by failure mode 1).
+**Failure mode 3: class-specific gaps**
+Evidence: at 0.5–2% area, `bus` and `truck` are found 67% of the time vs 87–89% for `car`, `motorcycle`, and `autorickshaw` (and 0.37–0.38 vs 0.58–0.65 at 0.1–0.5%, with ≥303 boxes per cell). `person` is lower than `car` at every size from 0.1% up (`0.56` vs `0.65`, `0.82` vs `0.88`, `0.86` vs `0.97`). Secondary issues in the hand-sorted images: two-wheeler plus rider predicted as `autorickshaw` (4 of 15 sorted images) and shadowed scenes (3 of 15). Zoomed crops of upper-floor balcony boxes (`highquality_16k__BLR-2018-06-19-06-21-44_part_47__0001013.jpg`, boxes 28–29) showed real people rather than label noise.
+Examples: `results/failures/highquality_16k__HYD-2018-04-26_13-40-01__0007741.jpg`, `results/failures/highquality_16k__HYD-2018-04-26_13-40-01__0006928.jpg`, `results/failures/highquality_16k__BLR-2018-06-20-05-53-14_part_4__0001049.jpg`
+Hypothesis: `yolov8s` helps with capacity-related confusion (`autorickshaw` vs two-wheeler, `person`); the cause for `bus` and `truck` still needs checking the confusion matrix alongside truncation and unlabeled `vehicle fallback` objects.
