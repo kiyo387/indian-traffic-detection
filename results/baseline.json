@@ -1,0 +1,25 @@
+{
+  "name": "baseline",
+  "weights": "runs/detect/idd-traffic/baseline/weights/best.pt",
+  "data": "configs/idd.yaml",
+  "imgsz": 640,
+  "map50": 0.5394718578222523,
+  "map50_95": 0.34499170259555856,
+  "precision": 0.7651482798583763,
+  "recall": 0.4676183031554422,
+  "per_class_map50_95": {
+    "car": 0.39896909951867576,
+    "motorcycle": 0.30991610815407333,
+    "rider": 0.2500669327182206,
+    "autorickshaw": 0.40770718571770964,
+    "bus": 0.463694829182863,
+    "truck": 0.3876288499573018,
+    "person": 0.19695891292006495
+  },
+  "speed_ms_per_image": {
+    "preprocess": 0.74,
+    "inference": 2.22,
+    "loss": 0.0,
+    "postprocess": 1.68
+  }
+}
