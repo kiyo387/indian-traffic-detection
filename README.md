@@ -23,6 +23,20 @@ The shift set measures viewpoint **and** object scale together (side/rear camera
 | Run | val mAP@50:95 | shift mAP@50:95 | Notes |
 | --- | ---: | ---: | --- |
 | yolov8n, 30 epochs, 640 | 0.345 | 0.484 | baseline |
+| yolov8n, 30 epochs, 640 @ 1280 | 0.407 | 0.422 | test-time 1280 (no retrain; bus/truck drop on shift) |
+| yolov8n, 30 epochs, 1280 (Run B) | 0.443 | 0.528 | `<0.05%` recall 7.3% → 25.3%, `0.05-0.1%` 30.9% → 56.9% |
+
+### Recall by size bin (`val`, `conf=0.25`)
+
+| Size bin | Boxes | Baseline (`640`) | Run B (`1280`) | Δ |
+| --- | ---: | ---: | ---: | ---: |
+| `<0.05%` | 22,385 | 7.3% | 25.3% | +18.1pp |
+| `0.05-0.1%` | 8,905 | 30.9% | 56.9% | +26.0pp |
+| `0.1-0.5%` | 18,093 | 59.2% | 73.2% | +14.0pp |
+| `0.5-2%` | 9,608 | 82.4% | 86.7% | +4.3pp |
+| `>2%` | 8,309 | 93.6% | 94.2% | +0.6pp |
+
+The two smallest bins rise sharply (`+18.1pp` and `+26.0pp`) while the large bins hold (`82.4% → 86.7%`, `93.6% → 94.2%`), supporting the tiny-object resolution hypothesis.
 
 Shift mAP is higher than val mAP because the shift cameras (side/rear) see fewer tiny distant objects — the dominant failure mode on val.
 

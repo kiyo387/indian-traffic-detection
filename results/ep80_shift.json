@@ -1,0 +1,25 @@
+{
+  "name": "ep80_shift",
+  "weights": "runs/detect/idd-traffic/ep80/weights/best.pt",
+  "data": "configs/idd_shift.yaml",
+  "imgsz": 640,
+  "map50": 0.6934982554055994,
+  "map50_95": 0.48765204629974546,
+  "precision": 0.8287832655741735,
+  "recall": 0.6191754395011119,
+  "per_class_map50_95": {
+    "car": 0.5639482385105499,
+    "motorcycle": 0.4792313012006092,
+    "rider": 0.39547386946765223,
+    "autorickshaw": 0.601583420929296,
+    "bus": 0.5753927917586188,
+    "truck": 0.4624384578804303,
+    "person": 0.3354962443510622
+  },
+  "speed_ms_per_image": {
+    "preprocess": 0.69,
+    "inference": 2.41,
+    "loss": 0.0,
+    "postprocess": 1.65
+  }
+}

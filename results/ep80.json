@@ -1,0 +1,25 @@
+{
+  "name": "ep80",
+  "weights": "runs/detect/idd-traffic/ep80/weights/best.pt",
+  "data": "configs/idd.yaml",
+  "imgsz": 640,
+  "map50": 0.5532420506297938,
+  "map50_95": 0.3543699223071155,
+  "precision": 0.7784428051546864,
+  "recall": 0.4808038622660014,
+  "per_class_map50_95": {
+    "car": 0.4083377025195765,
+    "motorcycle": 0.3179423602637393,
+    "rider": 0.25850127461893835,
+    "autorickshaw": 0.41822457313892275,
+    "bus": 0.4781123755333211,
+    "truck": 0.39548098725056774,
+    "person": 0.20399018282474293
+  },
+  "speed_ms_per_image": {
+    "preprocess": 0.72,
+    "inference": 2.23,
+    "loss": 0.0,
+    "postprocess": 1.67
+  }
+}
