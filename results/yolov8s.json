@@ -1,0 +1,25 @@
+{
+  "name": "yolov8s",
+  "weights": "runs/detect/idd-traffic/yolov8s/weights/best.pt",
+  "data": "configs/idd.yaml",
+  "imgsz": 640,
+  "map50": 0.5917034090710539,
+  "map50_95": 0.38376225753607635,
+  "precision": 0.7964634163967027,
+  "recall": 0.5147532476534672,
+  "per_class_map50_95": {
+    "car": 0.43669149158774817,
+    "motorcycle": 0.34636234113892145,
+    "rider": 0.28231001521125554,
+    "autorickshaw": 0.4532054102565346,
+    "bus": 0.5015049931677702,
+    "truck": 0.4305548156120632,
+    "person": 0.23570673577824164
+  },
+  "speed_ms_per_image": {
+    "preprocess": 0.74,
+    "inference": 4.51,
+    "loss": 0.0,
+    "postprocess": 1.65
+  }
+}
