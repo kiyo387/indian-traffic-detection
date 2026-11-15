@@ -1,0 +1,7 @@
+model,clip,resolution,imgsz,precision,fp16_api,frames,decode_ms,predict_ms,pre_ms,infer_ms,post_ms,fps_model,fps_end2end,dets_per_frame
+yolov8n_1280,test4,1920x1080,1280,fp32,fp32,200,3.4,22.4,5.2,13.8,2.6,44.6,38.7,28.8
+yolov8s_640,test4,1920x1080,640,fp32,fp32,200,3.3,19.1,1.8,13.8,2.5,52.3,44.7,14.6
+yolov8n_1280,test24,1920x1080,1280,fp32,fp32,200,3.3,21.3,5.2,12.8,2.5,46.9,40.7,137.2
+yolov8s_640,test24,1920x1080,640,fp32,fp32,200,3.1,18.7,1.7,13.6,2.4,53.6,45.9,73.2
+yolov8n_1280,test6,1920x1080,1280,fp32,fp32,200,3.2,21.8,5.1,13.3,2.5,46.0,40.1,54.6
+yolov8s_640,test6,1920x1080,640,fp32,fp32,200,3.4,19.0,1.8,13.8,2.5,52.6,44.6,37.3

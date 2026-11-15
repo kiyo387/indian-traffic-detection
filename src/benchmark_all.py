@@ -3,7 +3,7 @@ from pathlib import Path
 import cv2, torch
 from ultralytics import YOLO
 
-VID = Path(r"D:\DATA\traffic_videos")
+VID = Path(r"D:\DATA\traffic_videos_1080")
 CLIPS = ["test4", "test24", "test6"]
 MODELS = {
     "yolov8n_1280": ("runs/detect/idd-traffic/imgsz1280/weights/best.pt", 1280),
@@ -81,23 +81,26 @@ def bench(weights, imgsz, half, clip_path):
 
 def main():
     rows = []
+    Path("results").mkdir(exist_ok=True)
     for clip in CLIPS:
-        path = next(VID.glob(clip + ".*"))
+        matches = list(VID.glob(clip + ".*"))
+        if not matches:
+            print(f"skipping {clip}: not found in {VID}")
+            continue
+        path = matches[0]
         for name, (weights, imgsz) in MODELS.items():
-            for half in (False, True):
+            for half in (False,):
                 row = {"model": name, **bench(weights, imgsz, half, path)}
                 rows.append(row)
                 print(row["clip"], row["model"], row["precision"],
                       "| decode", row["decode_ms"], "ms",
                       "| predict", row["predict_ms"], "ms",
                       "| end-to-end", row["fps_end2end"], "FPS", flush=True)
-
-    Path("results").mkdir(exist_ok=True)
-    with open("results/fps_benchmark.csv", "w", newline="") as f:
-        wr = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        wr.writeheader()
-        wr.writerows(rows)
-    print("saved results/fps_benchmark.csv")
+                with open("results/fps_benchmark_1080.csv", "w", newline="") as f:
+                    wr = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+                    wr.writeheader()
+                    wr.writerows(rows)
+    print("saved results/fps_benchmark_1080.csv")
 
 
 if __name__ == "__main__":
