@@ -1,41 +1,44 @@
 import argparse, csv
 from collections import Counter
 
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
 
 def load(path):
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
+    rows = [r for r in rows if r.get("status", "counted") == "counted"]
     for r in rows:
         r["time_s"] = float(r["time_s"])
     return sorted(rows, key=lambda r: r["time_s"])
 
 
-def match(manual, det, tol):
-    used, pairs, fn = set(), [], []
-    for m in manual:
-        best = None
+def match(manual, det, tol, cls_penalty=0.6):
+    """Best overall pairing (Hungarian algorithm): same direction, within tol seconds,
+    a wrong class costs extra, so same-class pairs are preferred but not forced."""
+    if not manual or not det:
+        return [], list(manual), list(det)
+    BIG = 1e6
+    cost = np.full((len(manual), len(det)), BIG)
+    for i, m in enumerate(manual):
         for j, d in enumerate(det):
-            if j in used or d["direction"] != m["direction"]:
-                continue
             dt = abs(d["time_s"] - m["time_s"])
-            if dt > tol:
-                continue
-            key = (d["cls"] != m["cls"], dt)      # prefer the same class, then the closest time
-            if best is None or key < best[0]:
-                best = (key, j)
-        if best:
-            used.add(best[1])
-            pairs.append((m, det[best[1]]))
-        else:
-            fn.append(m)
-    fp = [d for j, d in enumerate(det) if j not in used]
+            if d["direction"] == m["direction"] and dt <= tol:
+                cost[i, j] = dt + (cls_penalty if d["cls"] != m["cls"] else 0.0)
+    rows, cols = linear_sum_assignment(cost)
+    ok = [(i, j) for i, j in zip(rows, cols) if cost[i, j] < BIG]
+    used_m, used_d = {i for i, _ in ok}, {j for _, j in ok}
+    pairs = [(manual[i], det[j]) for i, j in ok]
+    fn = [m for i, m in enumerate(manual) if i not in used_m]
+    fp = [d for j, d in enumerate(det) if j not in used_d]
     return pairs, fn, fp
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--events", required=True)      # results/count_<clip>_events.csv
-    p.add_argument("--manual", required=True)      # time_s,cls,direction
+    p.add_argument("--events", required=True)
+    p.add_argument("--manual", required=True)
     p.add_argument("--window", type=float, nargs=2, default=None)
     p.add_argument("--tol", type=float, default=1.0)
     a = p.parse_args()
