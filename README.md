@@ -1,78 +1,216 @@
 # indian-traffic-detection
 
-End-to-end computer vision pipeline for mixed Indian traffic: data prep, model comparison, tracking, and FastAPI deployment.
+End-to-end computer vision pipeline for mixed Indian traffic: dataset filtering, model comparison, failure analysis, FPS benchmarking, ByteTrack multi-object tracking, and directional vehicle counting with Hungarian evaluation.
 
-**Problem statement:** detect and count vehicles on Indian roads. Classes: car, motorcycle, rider, autorickshaw, bus, truck, person. Metric: mAP@50:95. Target speed: 20+ FPS.
+**Problem statement:** Detect, track, and count vehicles across mixed Indian road conditions.
+- **Classes (7):** `car`, `motorcycle`, `rider`, `autorickshaw`, `bus`, `truck`, `person` (counting excludes `rider`/`person` to prevent double-counting).
+- **Core Metric:** mAP@50:95.
+- **Speed Target:** 20+ FPS end-to-end on 1080p video.
+
+---
 
 ## Dataset
 
-[IDD Detection](http://idd.insaan.iiit.ac.in/) — 41,794 images, 507,576 bounding boxes across 15 classes (filtered to 7 road-user classes).
+Built from [IDD Detection](http://idd.insaan.iiit.ac.in/) (41,794 images, 507,576 bounding boxes across 15 classes, filtered to 7 road-user classes).
 
 | Split | Images | Boxes | Notes |
 | --- | ---: | ---: | --- |
-| train | 6,082 | 95,911 | `highquality_16k` + `frontNear`, every 3rd frame |
-| val | 5,138 | 67,298 | `highquality_16k` + `frontNear`, every 3rd frame |
-| shift | 3,922 | 18,760 | `sideLeft`, `sideRight`, `rearNear`, `frontFar` — different viewpoints |
+| **train** | 6,082 | 95,911 | `highquality_16k` + `frontNear`, subsampled every 3rd frame |
+| **val** | 5,138 | 67,298 | `highquality_16k` + `frontNear`, subsampled every 3rd frame |
+| **shift** | 3,922 | 18,760 | `sideLeft`, `sideRight`, `rearNear`, `frontFar` (out-of-distribution viewpoints) |
 
-The shift set measures viewpoint **and** object scale together (side/rear cameras see different distributions of object sizes than front cameras), so shift-set numbers are not a pure viewpoint-robustness test.
+*Known limitation:* Dropping `vehicle fallback` (~21k boxes), `caravan`, and `trailer` left those vehicles unlabeled, training models to treat them as background. Shift cameras also observe different object scale distributions than front cameras.
 
-**Known limitation:** Dropping `vehicle fallback` (~21k boxes), `caravan`, and `trailer` left those vehicles unlabeled in the images, so the model is trained to treat them as background.
+---
 
-## Results
+## Model Exploration & Results
 
-| Run | val mAP@50:95 | shift mAP@50:95 | Notes |
-| --- | ---: | ---: | --- |
-| yolov8n, 30 epochs, 640 | 0.345 | 0.484 | baseline |
-| yolov8n, 30 epochs, 640 @ 1280 | 0.407 | 0.422 | test-time 1280 (no retrain; bus/truck drop on shift) |
-| yolov8n, 30 epochs, 1280 (Run B) | 0.443 | 0.528 | `<0.05%` recall 7.3% → 25.3%, `0.05-0.1%` 30.9% → 56.9% |
+Four experimental runs evaluated on identical `val` and `shift` sets:
 
-### Recall by size bin (`val`, `conf=0.25`)
+| Run | Model | Config | val mAP@50:95 | shift mAP@50:95 | Speed (ms) | Notes |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| **Baseline** | YOLOv8n | 30 ep, 640 | 0.345 | 0.484 | 4.6 ms | Baseline detector |
+| **Test-time 1280** | YOLOv8n | 30 ep, test @ 1280 | 0.407 | 0.422 | 11.3 ms | No retrain; large vehicles degrade on shift |
+| **Run A** | YOLOv8n | 80 ep, 640 | 0.354 | 0.488 | 4.6 ms | +0.9pp; proves 30 ep was not severely undertrained |
+| **Run C** | YOLOv8s | 30 ep, 640 | 0.384 | 0.517 | 6.9 ms | +3.9pp; extra capacity helps class confusion |
+| **Run B (Winner)** | YOLOv8n | 30 ep, 1280 | **0.443** | **0.528** | 11.1 ms | **+9.8pp** val mAP; recovers small/distant objects |
 
-| Size bin | Boxes | Baseline (`640`) | Run B (`1280`) | Δ |
+### Per-Class mAP@50:95 (`val`)
+
+| Class | Baseline (640) | Run A (ep80) | Run C (yolov8s) | Run B (`imgsz=1280`) | Δ (vs Baseline) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `car` | 0.399 | 0.408 | 0.437 | **0.502** | +10.3pp |
+| `motorcycle` | 0.310 | 0.318 | 0.346 | **0.411** | +10.1pp |
+| `rider` | 0.250 | 0.259 | 0.282 | **0.347** | +9.7pp |
+| `autorickshaw` | 0.408 | 0.418 | 0.453 | **0.513** | +10.5pp |
+| `bus` | 0.464 | 0.478 | 0.502 | **0.535** | +7.1pp |
+| `truck` | 0.388 | 0.395 | 0.431 | **0.475** | +8.7pp |
+| `person` | 0.197 | 0.204 | 0.236 | **0.320** | +12.3pp |
+| **Overall** | **0.345** | **0.354** | **0.384** | **0.443** | **+9.8pp** |
+
+### Recall by Size Bin (`val`, `conf=0.25`)
+
+| Size bin | Boxes in Val | Baseline (`640`) | Run B (`1280`) | Δ |
 | --- | ---: | ---: | ---: | ---: |
-| `<0.05%` | 22,385 | 7.3% | 25.3% | +18.1pp |
-| `0.05-0.1%` | 8,905 | 30.9% | 56.9% | +26.0pp |
-| `0.1-0.5%` | 18,093 | 59.2% | 73.2% | +14.0pp |
-| `0.5-2%` | 9,608 | 82.4% | 86.7% | +4.3pp |
-| `>2%` | 8,309 | 93.6% | 94.2% | +0.6pp |
+| `<0.05%` area | 22,385 | 7.3% | 25.3% | **+18.0pp** |
+| `0.05-0.1%` area | 8,905 | 30.9% | 56.9% | **+26.0pp** |
+| `0.1-0.5%` area | 18,093 | 59.2% | 73.2% | **+14.0pp** |
+| `0.5-2%` area | 9,608 | 82.4% | 86.7% | +4.3pp |
+| `>2%` area | 8,309 | 93.6% | 94.2% | +0.6pp |
 
-The two smallest bins rise sharply (`+18.1pp` and `+26.0pp`) while the large bins hold (`82.4% → 86.7%`, `93.6% → 94.2%`), supporting the tiny-object resolution hypothesis.
+Tiny distant objects (~11×11 px at 640 vs ~21×21 px at 1280) were the primary failure mode of baseline detection. Run B sharpens recall on small objects without degrading larger objects.
 
-Shift mAP is higher than val mAP because the shift cameras (side/rear) see fewer tiny distant objects — the dominant failure mode on val.
+Full quantitative breakdown and gallery: [`results/failure_analysis.md`](results/failure_analysis.md).
 
-## Failure Analysis
+---
 
-Full analysis with tables: [`results/failure_analysis.md`](results/failure_analysis.md).
+## Speed Benchmark & Model Choice
 
-**Summary:** At `conf=0.25`, overall GT hit rate is 45.7%, with 51.1% misses and 3.1% wrong-class detections.
+Evaluated on 1080p traffic video copies (`results/fps_benchmark_1080.csv`, timed across 200 frames, batch=1, FP32 GPU):
 
-**Failure mode 1 — Small objects (dominant).** 33.3% of ground-truth boxes are under 0.05% of the image area and are found 7.3% of the time, against 82–94% for boxes over 0.5%. 93.9% of all incorrectly matched boxes (34,302 of 36,530) are under 0.5%. A `conf=0.1` rerun confirms the model genuinely cannot see tiny boxes (recall rises only to 12.8%, while `wrong_class` doubles 3.1% → 6.3%). Hypothesis: raising `imgsz` to 960 or 1280 recovers part of these (~11×11 px at 640 vs ~21×21 px at 1280 for a 0.05% box), though not all.
+| Model | Resolution | Clip | Model FPS | End-to-End FPS (incl. decode) | Detections / Frame |
+| --- | --- | --- | ---: | ---: | ---: |
+| **YOLOv8n @ 1280** | 1920×1080 | test4 | 44.6 | 38.7 | 28.8 |
+| YOLOv8s @ 640 | 1920×1080 | test4 | 52.3 | 44.7 | 14.6 |
+| **YOLOv8n @ 1280** | 1920×1080 | test24 (dense) | 46.9 | 40.7 | 137.2 |
+| YOLOv8s @ 640 | 1920×1080 | test24 (dense) | 53.6 | 45.9 | 73.2 |
+| **YOLOv8n @ 1280** | 1920×1080 | test6 | 46.0 | 40.1 | 54.6 |
+| YOLOv8s @ 640 | 1920×1080 | test6 | 52.6 | 44.6 | 37.3 |
 
-**Failure mode 2 — Crowding amplifies small-object misses.** Within `<0.05%` recall falls from 0.20 (1–5 boxes) to 0.04 (40+ boxes), and within `0.05-0.1%` from 0.48 to 0.23. Above 0.5% there is no effect (`0.81–0.83` and `0.93–0.94`). Note that the hand-sorted tally comes from the 20 worst images in `results/failures/`, so "15/15 contain tiny objects" reflects selection, not prevalence.
+**Selected Model:** `YOLOv8n @ 1280` (`models/final.pt`).
+- Delivers **~40 FPS end-to-end** on 1080p, doubling the 20 FPS real-time target.
+- Higher accuracy than YOLOv8s at 640 (+5.9pp val mAP, +1.1pp shift mAP).
+- Detects nearly 2× more valid vehicles per frame in crowded Indian road scenes.
 
-**Failure mode 3 — Class-specific gaps.** At 0.5–2% area, `bus` and `truck` are found 67% of the time vs 87–89% for `car`, `motorcycle`, and `autorickshaw` (and 0.37–0.38 vs 0.58–0.65 at 0.1–0.5%, with ≥303 boxes per cell). `person` is lower than `car` at every size from 0.1% up (`0.56` vs `0.65`, `0.82` vs `0.88`, `0.86` vs `0.97`). Secondary issues: two-wheeler plus rider predicted as `autorickshaw` (4 of 15 sorted images) and shadowed scenes (3 of 15); zoomed crops of tiny upper-floor balcony boxes (`part_47__0001013`) showed real people rather than label noise. Hypothesis: `yolov8s` helps with capacity-related confusion; the cause for `bus` and `truck` still needs the confusion matrix.
+---
 
-> **Note on metrics:** For vehicle **counting**, objects a few pixels wide far down the road may not matter. Reporting mAP on boxes ≥0.1% of the image alongside overall mAP may tell a better story.
+## Vehicle Tracking & Counting Pipeline
 
-> **Note on selection bias:** The 20 failure gallery images are the highest-error images by construction. The quantitative tables (67,300 boxes) are the real prevalence measures, not per-image tallies.
+A complete directional counting system with polygon gating, track persistence, and anti-flicker guards:
 
-## Week 2 Experiments
+```
+Video Stream ──> YOLOv8n @ 1280 ──> ByteTrack ──> Bottom-Center Road Point
+                                                         │
+                                               [ROI Polygon Filter]
+                                                         │
+                                        [Analytical Segment Crossing (+/-)]
+                                                         │
+                 ┌───────────────────────────────────────┴───────────────────────────────────────┐
+                 │ Stability Guards:                                                            │
+                 │ 1. Minimum track age (≥5 frames inside ROI)                                  │
+                 │ 2. Jump clamp (≤150 px frame-to-frame movement)                              │
+                 │ 3. Lookback velocity check (≥5 px along line normal over 8 frames)           │
+                 │ 4. Spatio-temporal deduplication (IoU ≥ 0.4 within 12 frames)                │
+                 │ 5. Lifetime majority voting for vehicle class                                 │
+                 │ 6. Class-agnostic NMS to suppress rider/two-wheeler double boxes             │
+                 └───────────────────────────────────────┬───────────────────────────────────────┘
+                                                         │
+                                  ┌──────────────────────┴──────────────────────┐
+                                  ▼                                             ▼
+                      count_<clip>.mp4 (HUD overlay)               count_<clip>_events.csv
+                      count_<clip>_review.jpg (audit crop sheet)
+```
 
-One change per run on the same `val` and `shift` sets, starting with **B**:
+### Pipeline Tools
 
-| Run | Change from baseline | Tests |
-| --- | --- | --- |
-| **B** | `imgsz=1280`, 30 epochs | Tiny-object hypothesis (~4× compute; `batch=4–8` for 6 GB GPU) |
-| **A** | 80 epochs, `imgsz=640` | Undertrained curves (baseline curves were still rising) |
-| **C** | `yolov8s`, 30 epochs | Model capacity / class confusion |
-| **D** | RT-DETR, later | Detector family, once A–C show which settings matter |
+1. **Interactive Geometry Picker (`src/pick_geometry.py`):** Click counting line (start/end defining normal direction) and arbitrary polygon ROI zone. Saves geometry JSON and overlay PNG.
+2. **Traffic Counter (`src/count_traffic.py`):** Runs detection, ByteTrack tracking, crossing verification, deduplication, and renders live HUD counts.
+3. **Contact Sheet Generator:** Automatically crops counted vehicles into a grid image (`_review.jpg`) with timestamp, track ID, and direction for quick visual audit.
+
+---
+
+## Counting Evaluation
+
+Line crossings are evaluated against manual frame-by-frame ground truth using the **Hungarian algorithm** (`src/eval_counts.py`). Pairs are matched by time proximity (within tolerance window) and movement direction, with an extra penalty for mismatched classes.
+
+**Results on test video (`test17`, 10s–20s evaluation window):**
+
+| Metric | Score | Detail |
+| --- | ---: | --- |
+| **Manual Ground Truth Crossings** | 18 | Human-annotated events |
+| **Detected Crossings** | 17 | Counted by pipeline |
+| **True Positive Matches** | 16 | Matched to GT event |
+| **Missed (False Negatives)** | 2 | Occluded or missed crossing |
+| **Extra (False Positives)** | 1 | Spurious count |
+| **Crossing Recall** | **88.9% (0.89)** | `16 / 18` |
+| **Crossing Precision** | **94.1% (0.94)** | `16 / 17` |
+| **Class Accuracy (among matched)** | **93.8% (0.94)** | 15 of 16 matched vehicles classified correctly |
+
+---
 
 ## Project Structure
 
 ```
-configs/          YOLO dataset configs (idd.yaml, idd_shift.yaml)
-notebooks/        EDA and analysis (01_eda.ipynb)
-results/          Evaluation JSONs, parquet files, failure_analysis.md, failure gallery
-runs/             YOLO training outputs
-src/              Scripts (evaluate.py)
+configs/
+  idd.yaml                    # IDD dataset train/val config
+  idd_shift.yaml              # Shift-set evaluation config
+  geometry_test*.json         # Counting line and ROI definitions
+  geometry_test*.png          # Visual verification overlays
+models/
+  final.pt                    # Selected model checkpoint (YOLOv8n @ 1280)
+notebooks/
+  01_eda.ipynb                # Dataset exploratory data analysis
+results/
+  *.json                      # Model evaluation metrics (mAP, speed)
+  *.parquet                   # Match tables for failure analysis
+  failure_analysis.md         # Deep-dive error analysis
+  fps_benchmark_1080.csv      # Real-time latency benchmark on 1080p clips
+  count_*.mp4                 # Annotated video outputs with counts HUD
+  count_*_events.csv          # Event-level crossing log
+  count_*_review.jpg          # Cropped vehicle audit contact sheets
+src/
+  benchmark_all.py            # Latency benchmark harness across clips & models
+  benchmark_fps.py            # Single-run FPS timer
+  count_traffic.py            # Real-time tracking and directional counting pipeline
+  error_analysis.py           # Generates GT match tables and recall by bin/class
+  eval_counts.py              # Hungarian matching evaluation against manual counts
+  evaluate.py                 # Evaluates mAP on YOLO validation sets
+  pick_geometry.py            # Interactive OpenCV GUI for line and ROI calibration
+  track_video.py              # Basic ByteTrack video visualizer
+  video_info.py               # Video metadata probe and contact sheet creator
+```
+
+---
+
+## Quickstart
+
+### 1. Environment Setup
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate       # Windows (.venv/bin/activate on Linux)
+pip install -r requirements.txt  # ultralytics opencv-python pandas scipy
+```
+
+### 2. Calibrate Line & ROI on a Video
+
+```bash
+python src/pick_geometry.py --video path/to/video.mp4 --frame 300 --out configs/geometry_myvideo.json
+```
+- **Step 1:** Click two points to define the counting line (first point to second point defines the vector, normal defines `+` vs `-`). Press `Enter`.
+- **Step 2:** Click 3+ points to define the tracking ROI zone. Press `Enter`.
+
+### 3. Run Tracking and Vehicle Counting
+
+```bash
+python src/count_traffic.py \
+  --video path/to/video.mp4 \
+  --weights models/final.pt \
+  --geometry configs/geometry_myvideo.json \
+  --imgsz 1280 \
+  --conf 0.25
+```
+Outputs written to `results/`:
+- `count_<video>.mp4` (video with HUD and tracks)
+- `count_<video>_events.csv` (time, track ID, class, direction)
+- `count_<video>_review.jpg` (visual crop contact sheet)
+
+### 4. Evaluate Counting Accuracy Against Manual Counts
+
+```bash
+python src/eval_counts.py \
+  --events results/count_test17_v2_events.csv \
+  --manual data/manual_test17.csv \
+  --window 10 20 \
+  --tol 1.0
 ```

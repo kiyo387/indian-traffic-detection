@@ -3,3 +3,24 @@ data/
 wandb/
 runs/
 *.pt
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment & credentials
+.env
+
+# Editors & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Model checkpoints & exports
+models/
+*.onnx
+*.engine
