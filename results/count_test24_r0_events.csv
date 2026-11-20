@@ -1,0 +1,14 @@
+frame,time_s,id,cls,direction,status
+15,0.5,211,car,to_minus,counted
+145,4.83,1093,car,to_minus,counted
+147,4.9,201,car,to_minus,counted
+194,6.47,179,car,to_minus,counted
+194,6.47,1117,bus,to_minus,counted
+199,6.63,1832,car,to_minus,counted
+215,7.17,155,car,to_minus,counted
+252,8.4,24,car,to_minus,counted
+254,8.47,2670,motorcycle,to_minus,counted
+273,9.1,2941,motorcycle,to_minus,counted
+286,9.53,2400,car,to_minus,counted
+291,9.7,481,car,to_minus,counted
+292,9.73,417,car,to_minus,counted

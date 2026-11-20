@@ -45,7 +45,11 @@ def main():
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--stride", type=int, default=1)
     p.add_argument("--tracker", default="bytetrack.yaml")
-    p.add_argument("--min_age", type=int, default=5)        # frames in the ROI before a track can count
+    p.add_argument("--min_age", type=int, default=3)        # frames in the ROI before a track can count
+    p.add_argument("--reset_dist", type=float, default=30.0)   # px behind the line before a counted ID may count again
+    p.add_argument("--switch_jump", type=float, default=20)   # px of backward jump that signals an ID switch
+    p.add_argument("--no_reset", action="store_true")
+    p.add_argument("--only_dir", choices=["to_plus", "to_minus"], default=None)
     p.add_argument("--max_jump", type=float, default=150)   # px between frames
     p.add_argument("--vel_frames", type=int, default=8)     # look-back for the direction check
     p.add_argument("--min_move", type=float, default=5.0)   # px of net movement across the line over that look-back
@@ -77,6 +81,7 @@ def main():
 
     A = B = roi = writer = None
     last_pt = {}
+    last_seen = {}
     hist = defaultdict(lambda: deque(maxlen=a.vel_frames + 1))
     age, votes, counted = defaultdict(int), defaultdict(Counter), {}
     counts, events, crops, recent, dup_ids = Counter(), [], [], [], set()
@@ -111,11 +116,26 @@ def main():
                 votes[tid][c] += 1
                 prev, last_pt[tid] = last_pt.get(tid), pt
                 hist[tid].append(pt)
+                sd = NX * (pt[0] - A[0]) + NY * (pt[1] - A[1])      # signed distance to the line, px
+                if not a.no_reset and tid in counted and sd * counted[tid] < 0:
+                    gap = fidx - last_seen.get(tid, fidx)
+                    jump = np.hypot(pt[0] - prev[0], pt[1] - prev[1]) if prev is not None else 0.0
+                    if (sd * counted[tid] < -a.reset_dist * fs or gap > a.stride
+                            or jump >= a.switch_jump * fs):
+                        counted.pop(tid)                 # most likely the ID moved onto a different vehicle
+                        dup_ids.discard(tid)
+                        votes[tid] = Counter({c: 1})
+                        hist[tid].clear()
+                        hist[tid].append(pt)
+                        prev = None
+                last_seen[tid] = fidx
                 done = tid in counted
 
                 if (prev is not None and not done and age[tid] >= a.min_age and len(hist[tid]) >= 3
                         and np.hypot(pt[0] - prev[0], pt[1] - prev[1]) <= a.max_jump):
                     d = crossing(prev, pt, A, B)
+                    if d and a.only_dir and d != (1 if a.only_dir == "to_plus" else -1):
+                        d = 0
                     if d:
                         past = hist[tid][0]
                         move = ((pt[0] - past[0]) * NX + (pt[1] - past[1]) * NY) * d

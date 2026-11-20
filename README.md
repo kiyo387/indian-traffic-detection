@@ -121,20 +121,29 @@ Video Stream ──> YOLOv8n @ 1280 ──> ByteTrack ──> Bottom-Center Road
 
 ## Counting Evaluation
 
-Line crossings are evaluated against manual frame-by-frame ground truth using the **Hungarian algorithm** (`src/eval_counts.py`). Pairs are matched by time proximity (within tolerance window) and movement direction, with an extra penalty for mismatched classes.
+Line crossings are evaluated against manual frame-by-frame ground truth using the **Hungarian algorithm** (`src/eval_counts.py`). Pairs are matched by time proximity (`--tol 0.3` seconds) and movement direction, with an extra penalty for mismatched classes.
 
-**Results on test video (`test17`, 10s–20s evaluation window):**
+Evaluation is split into **"tuned on"** clips (where geometry and filters were calibrated during development) and **"not tuned on"** clips (blind evaluation including fresh footage):
 
-| Metric | Score | Detail |
-| --- | ---: | --- |
-| **Manual Ground Truth Crossings** | 18 | Human-annotated events |
-| **Detected Crossings** | 17 | Counted by pipeline |
-| **True Positive Matches** | 16 | Matched to GT event |
-| **Missed (False Negatives)** | 2 | Occluded or missed crossing |
-| **Extra (False Positives)** | 1 | Spurious count |
-| **Crossing Recall** | **88.9% (0.89)** | `16 / 18` |
-| **Crossing Precision** | **94.1% (0.94)** | `16 / 17` |
-| **Class Accuracy (among matched)** | **93.8% (0.94)** | 15 of 16 matched vehicles classified correctly |
+| Group | Clip | Window | Manual | Detected | Matched | Missed | Extra | Class Accuracy | Notes |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Tuned on** | `test17` | 10–20s | 18 | 18 | 16 | 2 | 2 | 15/16 (94%) | Overhead view, northbound |
+| **Tuned on** | `test4` | 5–15s | 20 | 15 | 15 | 5 | 0 | 15/15 (100%) | Mixed arterial road |
+| **Tuned on** | `test10` | 10–20s | 22 | 18 | 17 | 5 | 1 | 17/17 (100%) | Highway flyover |
+| **Not tuned on** | `test6` | 1–6s | 53 | 43 | 41 | 12 | 2 | 39/41 (95%) | High-volume two-way arterial |
+| **Not tuned on** | `test24` | 2–7s | 8 | 5 | 5 | 3 | 0 | 5/5 (100%) | Standstill dense jam stress test |
+| **Not tuned on (Fresh)** | `test16` | 1–9s | 12 | 13 | 12 | 0 | 1 | 12/12 (100%) | Fresh blind test |
+| **Not tuned on (Fresh)** | `test25` | 10–20s | 21 | 31 | 21 | 0 | 10 | 20/21 (95%) | Fresh blind test |
+
+### Known Failure Modes & Limitations
+1. **Missed Crossings:**
+   - **Occluded two-wheelers:** In dense traffic, motorcycles riding directly between or behind cars are heavily occluded from camera view (5 of 11 misses on earlier clips). Lowering detector confidence does not recover them without introducing false detections.
+   - **ID switches on tailgating vehicles:** In closely following traffic, ByteTrack may latch an active track ID from a leading vehicle directly onto the trailing vehicle.
+   - **Standstill congestion:** In heavy stop-and-go jams (e.g. `test24`), static vehicles with micro-jitter can cause tracker fragmentation or false reverse-direction tracks.
+2. **Per-Class Reliability:**
+   - Per-class counts are less reliable for `autorickshaw` and `truck` due to viewpoint ambiguity and class confusion with cars/mini-trucks.
+3. **Direction Constraint (`--only_dir`):**
+   - `--only_dir` (`to_plus` or `to_minus`) is a per-scene operational configuration for known one-way road segments. It suppresses wrong-way tracks by construction. On two-way streets (`test6`, `test16`, `test25`), directional counting runs unconstrained.
 
 ---
 

@@ -51,6 +51,9 @@ def main():
 
     pairs, fn, fp = match(manual, det, a.tol)
     tp = len(pairs)
+    dts = sorted(abs(d["time_s"] - m["time_s"]) for m, d in pairs)
+    if dts:
+        print(f"time offset of matched pairs: median {dts[len(dts) // 2]:.2f}s, largest {dts[-1]:.2f}s")
     cls_ok = sum(m["cls"] == d["cls"] for m, d in pairs)
     print(f"manual crossings: {len(manual)}   detected crossings: {len(det)}")
     print(f"matched: {tp}   missed: {len(fn)}   extra: {len(fp)}")

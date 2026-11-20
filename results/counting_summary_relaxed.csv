@@ -1,0 +1,6 @@
+clip,window,manual,detected,matched,missed,extra,class_correct
+test17,10-20s,18,19,17,1,2,15/17
+test4,5-15s,20,15,15,5,0,15/15
+test10,10-20s,22,20,20,2,0,16/20
+test6,1-6s,53,64,50,3,14,44/50
+test24,2-7s,8,14,7,1,7,7/7
