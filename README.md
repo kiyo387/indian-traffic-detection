@@ -214,3 +214,9 @@ python src/eval_counts.py \
   --window 10 20 \
   --tol 1.0
 ```
+
+| clip | window | manual | detected | matched | missed | extra | class_correct |
+|---|---|---|---|---|---|---|---|
+| test17 | 10-20s | 18 | 17 | 16 | 2 | 1 | 15/16 |
+| test4 | 5-15s | 20 | 15 | 15 | 5 | 0 | 15/15 |
+| test10 | 10-20s | 22 | 18 | 18 | 4 | 0 | 17/18 |
