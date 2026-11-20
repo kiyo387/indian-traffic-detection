@@ -11,7 +11,11 @@ def main():
     a = p.parse_args()
 
     cap = cv2.VideoCapture(a.video)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, a.frame)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_idx = min(a.frame, max(total - 1, 0))
+    if frame_idx != a.frame:
+        print(f"video has only {total} frames, using frame {frame_idx} instead of {a.frame}")
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
     ok, frame = cap.read()
     cap.release()
     assert ok, "could not read that frame"
