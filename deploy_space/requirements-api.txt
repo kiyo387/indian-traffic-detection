@@ -1,6 +1,0 @@
-# torch and torchvision (CPU wheels) are installed separately in the Dockerfile
-ultralytics==8.4.203
-fastapi==0.165.0
-uvicorn==0.54.0
-python-multipart==0.0.34
-gradio==6.32.0

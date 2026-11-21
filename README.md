@@ -150,6 +150,12 @@ Evaluation is split into **"tuned on"** clips (where geometry and filters were c
 ## Project Structure
 
 ```
+app/
+  main.py                     # FastAPI REST API endpoints (/detect, /count, /jobs)
+  services.py                 # Async job runner, video clipping, and background worker
+  ui.py                       # Gradio web interface components
+assets/
+  demo.jpg                    # Web UI demo screenshot
 configs/
   idd.yaml                    # IDD dataset train/val config
   idd_shift.yaml              # Shift-set evaluation config
@@ -177,6 +183,9 @@ src/
   pick_geometry.py            # Interactive OpenCV GUI for line and ROI calibration
   track_video.py              # Basic ByteTrack video visualizer
   video_info.py               # Video metadata probe and contact sheet creator
+Dockerfile                    # Production Docker container definition
+requirements-api.txt          # API & Web UI dependencies
+requirements.txt              # Pipeline dependencies (ultralytics, opencv, pandas, scipy)
 ```
 
 ---
@@ -273,7 +282,7 @@ Pooled over the seven windows: **127 of 154 reference crossings were found (82%)
 - **test25:** all 10 extras are in one direction and include autorickshaws, a motorcycle and trucks, while the reference lists only cars. These are probably vehicles missing from the reference, so the 10 extras are not a reliable precision estimate. This was not checked.
 - Windows are 5 to 10 s long, there are 154 reference crossings in total, and there is one reference per clip, so one event moves a clip's recall by several points. No confidence intervals are given.
 - Settings were chosen by looking at the tuned windows. Compare "tuned on" and "not tuned on" rows accordingly.
-- The evaluation processed every frame. The hosted demo processes every 2nd frame to fit on a small CPU, and that setting was not evaluated.
+- The evaluation processed every frame. The demo container processes every 2nd frame by default (`STRIDE=2`) for CPU efficiency, which was not evaluated.
 
 ### Known failure cases
 
@@ -302,31 +311,73 @@ python src/count_traffic.py --video <clip>.mp4 --geometry configs/geometry_<clip
 python src/run_all_counts.py v3
 ```
 
-## API and demo
+## Docker Deployment & Web API
 
-The counter and detector are served as a FastAPI service with a Gradio demo. Add the live link here after deploying:
-`https://huggingface.co/spaces/<USER>/<SPACE>`.
+The detector and counter are packaged as a containerized FastAPI application with an integrated Gradio web UI.
 
-| Endpoint | What it does |
-| :--- | :--- |
-| `GET /health` | status, device and limits |
-| `POST /detect` | one image in (JPEG or PNG), detections out as JSON |
-| `POST /count` | starts a counting job on a short video and returns a `job_id` |
-| `GET /jobs/{job_id}` | job status, and the counts when done |
-| `GET /jobs/{job_id}/video` | annotated video (H.264 mp4) |
-| `GET /jobs/{job_id}/events` | every counted crossing as CSV |
-| `/demo` | Gradio UI: upload a clip, place the line, get counts |
-| `/docs` | interactive API documentation |
+![Indian Traffic Detection and Counting Demo](assets/demo.jpg)
 
-```
-curl.exe -F "file=@clip.mp4" -F "line_y=0.5" -F "roi_top=0.25" http://localhost:7860/count
-curl.exe http://localhost:7860/jobs/<job_id>
-```
+### Quick Start with Docker
 
-Demo limits (set by environment variables): the first 10 s of a clip, 60 MB, every 2nd frame, CPU only, one video at a time.
-By default the counting line is horizontal; `to_plus` means moving down the image (toward the camera).
+Build and run the container locally:
 
-```
+```bash
+# Build the Docker image
 docker build -t traffic-demo .
+
+# Run container on port 7860
 docker run --rm -p 7860:7860 traffic-demo
+```
+
+Once running, access:
+- **Gradio Web Interface:** [http://localhost:7860/demo](http://localhost:7860/demo) (or root [http://localhost:7860](http://localhost:7860))
+- **Interactive OpenAPI/Swagger Docs:** [http://localhost:7860/docs](http://localhost:7860/docs)
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `GET /health` | `GET` | Health status, compute device, model weights state, and configured limits |
+| `/detect` | `POST` | Single-frame vehicle detection (JPEG or PNG); returns bounding boxes, labels, and confidences |
+| `/count` | `POST` | Dispatches an asynchronous counting job for an uploaded video; returns a `job_id` |
+| `/jobs/{job_id}` | `GET` | Polls job processing status and retrieves final directional count tallies |
+| `/jobs/{job_id}/video` | `GET` | Streams or downloads the annotated result video with HUD overlays (H.264 MP4) |
+| `/jobs/{job_id}/events` | `GET` | Exports every individual crossing event with timestamp, track ID, and class as CSV |
+| `/demo` | `GET` | Interactive Gradio browser UI |
+| `/docs` | `GET` | Swagger / OpenAPI documentation |
+
+### Programmatic Usage
+
+Submit a video counting job via cURL:
+
+```bash
+# Submit counting job (horizontal line at 50% image height, ROI top at 25%)
+curl.exe -F "file=@clip.mp4" -F "line_y=0.5" -F "roi_top=0.25" http://localhost:7860/count
+
+# Poll job status and vehicle counts
+curl.exe http://localhost:7860/jobs/<job_id>
+
+# Download annotated video when completed
+curl.exe -O http://localhost:7860/jobs/<job_id>/video
+```
+
+### Container Configuration
+
+Default service parameters can be customized via environment variables when running Docker:
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `DEVICE` | `cpu` | PyTorch execution device (`cpu` or `0` for CUDA GPU) |
+| `IMGSZ` | `1280` | Input inference resolution |
+| `STRIDE` | `2` | Frame stride (processes every Nth frame to reduce CPU latency) |
+| `MAX_SECONDS` | `10` | Maximum clip duration analyzed per job |
+| `MAX_UPLOAD_MB` | `60` | Maximum file size for video uploads |
+
+Example overriding settings for GPU or longer clips:
+
+```bash
+docker run --rm -p 7860:7860 \
+  -e MAX_SECONDS=20 \
+  -e STRIDE=1 \
+  traffic-demo
 ```

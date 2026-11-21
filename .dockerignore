@@ -7,6 +7,6 @@ data
 results
 wandb
 notebooks
-deploy_space
+assets
 *.mp4
 *.zip

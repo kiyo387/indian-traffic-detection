@@ -1,18 +1,24 @@
+# Virtual environments
 .venv/
+env/
+venv/
+
+# Datasets & training runs
 data/
 wandb/
 runs/
-*.pt
 
-# Python bytecode & cache
+# Python cache & bytecode
 __pycache__/
 *.py[cod]
+*$py.class
 
 # Jupyter
 .ipynb_checkpoints/
 
 # Environment & credentials
 .env
+*.env
 
 # Editors & OS
 .vscode/
@@ -20,7 +26,11 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Model checkpoints & exports
+# Model checkpoints & engine exports
 models/
+*.pt
 *.onnx
 *.engine
+
+# Ephemeral build & space directories
+deploy_space/
