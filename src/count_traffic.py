@@ -1,3 +1,7 @@
+"""Vehicle counting: detector -> ByteTrack -> region of interest + counting line.
+
+Frozen settings used for the README results are the defaults below (min_age 3, ID-switch reset on).
+"""
 import argparse, csv, json, time
 from collections import Counter, defaultdict, deque
 from pathlib import Path
@@ -6,7 +10,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-VEHICLES = [0, 1, 3, 4, 5]          # car, motorcycle, autorickshaw, bus, truck
+VEHICLES = [0, 1, 3, 4, 5]          # car, motorcycle, autorickshaw, bus, truck (rider and person are not counted)
 DEFAULT_GEOMETRY = {"line": [[0.05, 0.50], [0.95, 0.50]],
                     "roi": [[0.0, 0.25], [1.0, 0.25], [1.0, 1.0], [0.0, 1.0]]}
 
@@ -40,48 +44,52 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--video", required=True)
     p.add_argument("--weights", default="models/final.pt")
-    p.add_argument("--geometry", default=None)
+    p.add_argument("--geometry", default=None)               # JSON from pick_geometry.py
     p.add_argument("--imgsz", type=int, default=1280)
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--stride", type=int, default=1)
     p.add_argument("--tracker", default="bytetrack.yaml")
-    p.add_argument("--min_age", type=int, default=3)        # frames in the ROI before a track can count
-    p.add_argument("--reset_dist", type=float, default=30.0)   # px behind the line before a counted ID may count again
-    p.add_argument("--switch_jump", type=float, default=20)   # px of backward jump that signals an ID switch
-    p.add_argument("--no_reset", action="store_true")
-    p.add_argument("--only_dir", choices=["to_plus", "to_minus"], default=None)
-    p.add_argument("--max_jump", type=float, default=150)   # px between frames
-    p.add_argument("--vel_frames", type=int, default=8)     # look-back for the direction check
-    p.add_argument("--min_move", type=float, default=5.0)   # px of net movement across the line over that look-back
+    p.add_argument("--device", default="0")                  # "0" = first GPU, "cpu" = CPU
+    p.add_argument("--outdir", default="results")
+    p.add_argument("--min_age", type=int, default=3)         # frames in the ROI before a track can count
+    p.add_argument("--max_jump", type=float, default=150)    # px between frames
+    p.add_argument("--vel_frames", type=int, default=8)      # look-back for the direction check
+    p.add_argument("--min_move", type=float, default=5.0)    # px of net movement across the line over that look-back
     p.add_argument("--dedup_frames", type=int, default=12)
     p.add_argument("--dedup_iou", type=float, default=0.4)
-    p.add_argument("--no_agnostic", action="store_true")    # turn class-agnostic suppression off
-    p.add_argument("--window", type=float, nargs=2, default=None)
+    p.add_argument("--reset_dist", type=float, default=30.0)  # px behind the line before a counted ID may count again
+    p.add_argument("--switch_jump", type=float, default=20.0)  # px of backward jump that signals an ID switch
+    p.add_argument("--no_reset", action="store_true")
+    p.add_argument("--no_agnostic", action="store_true")     # turn class-agnostic suppression off
+    p.add_argument("--only_dir", choices=["to_plus", "to_minus"], default=None)
+    p.add_argument("--window", type=float, nargs=2, default=None)   # e.g. --window 10 20 (seconds)
     p.add_argument("--max_frames", type=int, default=0)
     p.add_argument("--out_width", type=int, default=1280)
+    p.add_argument("--no_review", action="store_true")       # skip the thumbnail sheet
     p.add_argument("--tag", default="")
     a = p.parse_args()
 
     geom = json.loads(Path(a.geometry).read_text()) if a.geometry else DEFAULT_GEOMETRY
+    device = int(a.device) if a.device.isdigit() else a.device
     model = YOLO(a.weights)
     names = model.names
     stem = Path(a.video).stem + (f"_{a.tag}" if a.tag else "")
-    Path("results").mkdir(exist_ok=True)
-    out_video = Path("results") / f"count_{stem}.mp4"
-    out_csv = Path("results") / f"count_{stem}_events.csv"
-    out_review = Path("results") / f"count_{stem}_review.jpg"
+    outdir = Path(a.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    out_video = outdir / f"count_{stem}.mp4"
+    out_csv = outdir / f"count_{stem}_events.csv"
+    out_review = outdir / f"count_{stem}_review.jpg"
 
     cap = cv2.VideoCapture(a.video)
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     cap.release()
 
     stream = model.track(source=a.video, stream=True, tracker=a.tracker, persist=True, imgsz=a.imgsz,
-                         conf=a.conf, classes=VEHICLES, vid_stride=a.stride, device=0, verbose=False,
+                         conf=a.conf, classes=VEHICLES, vid_stride=a.stride, device=device, verbose=False,
                          agnostic_nms=not a.no_agnostic)
 
     A = B = roi = writer = None
-    last_pt = {}
-    last_seen = {}
+    last_pt, last_seen = {}, {}
     hist = defaultdict(lambda: deque(maxlen=a.vel_frames + 1))
     age, votes, counted = defaultdict(int), defaultdict(Counter), {}
     counts, events, crops, recent, dup_ids = Counter(), [], [], [], set()
@@ -116,13 +124,15 @@ def main():
                 votes[tid][c] += 1
                 prev, last_pt[tid] = last_pt.get(tid), pt
                 hist[tid].append(pt)
+
+                # ID-switch handling: a counted ID that reappears behind its line is treated as a new vehicle
                 sd = NX * (pt[0] - A[0]) + NY * (pt[1] - A[1])      # signed distance to the line, px
                 if not a.no_reset and tid in counted and sd * counted[tid] < 0:
                     gap = fidx - last_seen.get(tid, fidx)
                     jump = np.hypot(pt[0] - prev[0], pt[1] - prev[1]) if prev is not None else 0.0
                     if (sd * counted[tid] < -a.reset_dist * fs or gap > a.stride
                             or jump >= a.switch_jump * fs):
-                        counted.pop(tid)                 # most likely the ID moved onto a different vehicle
+                        counted.pop(tid)
                         dup_ids.discard(tid)
                         votes[tid] = Counter({c: 1})
                         hist[tid].clear()
@@ -152,11 +162,12 @@ def main():
                             events.append({"frame": fidx, "time_s": round(t_s, 2), "id": tid, "cls": cname,
                                            "direction": "to_plus" if d > 0 else "to_minus",
                                            "status": "duplicate" if dup else "counted"})
-                            x1, y1, x2, y2 = [int(max(0, v)) for v in bb]
-                            crop = r.orig_img[y1:y2, x1:x2]
-                            if crop.size:
-                                crop = cv2.resize(crop, (max(40, int(crop.shape[1] * 150 / crop.shape[0])), 150))
-                                crops.append((crop, f"{'DUP ' if dup else ''}{t_s:.1f}s #{tid} {cname} {'+' if d > 0 else '-'}"))
+                            if not a.no_review:
+                                x1, y1, x2, y2 = [int(max(0, v)) for v in bb]
+                                crop = r.orig_img[y1:y2, x1:x2]
+                                if crop.size:
+                                    crop = cv2.resize(crop, (max(40, int(crop.shape[1] * 150 / crop.shape[0])), 150))
+                                    crops.append((crop, f"{'DUP ' if dup else ''}{t_s:.1f}s #{tid} {cname} {'+' if d > 0 else '-'}"))
                             done = True
 
                 color = (255, 0, 255) if tid in dup_ids else ((0, 255, 255) if done else (0, 200, 0))
@@ -228,9 +239,9 @@ def main():
                      for e in events if e["status"] == "counted" and lo <= e["time_s"] <= hi)
         table(f"Window {lo}s to {hi}s", wc)
     print(f"\ncounted {sum(counts.values())}, duplicates suppressed {n_dup}")
-    print(f"{n} frames in {elapsed:.1f} s ({n / elapsed:.1f} FPS including drawing and writing)")
+    print(f"{n} frames in {elapsed:.1f} s ({n / max(elapsed, 1e-6):.1f} FPS including drawing and writing)")
     print(f"track IDs seen inside the ROI: {len(age)}, of which crossed: {len(counted)}")
-    print("saved", out_video, out_csv, out_review)
+    print("saved", out_video, out_csv, out_review if crops and not a.no_review else "")
 
 
 if __name__ == "__main__":

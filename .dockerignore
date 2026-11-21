@@ -1,0 +1,12 @@
+.venv
+.git
+__pycache__
+*.pyc
+runs
+data
+results
+wandb
+notebooks
+deploy_space
+*.mp4
+*.zip

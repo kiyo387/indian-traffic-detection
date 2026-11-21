@@ -229,3 +229,104 @@ python src/eval_counts.py \
 | test17 | 10-20s | 18 | 17 | 16 | 2 | 1 | 15/16 |
 | test4 | 5-15s | 20 | 15 | 15 | 5 | 0 | 15/15 |
 | test10 | 10-20s | 22 | 18 | 18 | 4 | 0 | 17/18 |
+
+## Vehicle counting
+
+For fixed-camera traffic videos: detect vehicles (YOLOv8, trained at 1280 px), track them with ByteTrack, and count each
+vehicle once when it crosses a user-defined line inside a zone, per class and per direction. A counted vehicle turns
+yellow in the annotated video.
+
+### How the counter decides
+
+- **One reference point per vehicle:** the bottom-center of its box (where it touches the road in an elevated view).
+- **Zone (ROI):** only points inside a polygon count, which removes the dense far-distance clutter and parked vehicles at the edges.
+- **Crossing:** the point moves from one side of the line to the other between consecutive frames, inside the line's endpoints.
+- **Direction check:** the track must have moved at least 5 px across the line over its last 8 frames, which removes box-jitter crossings.
+- **Minimum age:** a track must have been inside the zone for 3 frames, which removes flicker IDs.
+- **Duplicate filter:** a crossing is skipped if another counted crossing in the same direction within 12 frames has an overlapping box (IoU >= 0.4). This catches one vehicle tracked under two IDs.
+- **ID-switch reset:** a counted ID that reappears behind its line after a gap or a jump is treated as a new vehicle.
+- **Class:** majority vote over the track's life. Overlapping boxes are suppressed across classes, so one vehicle cannot be both a "car" and a "truck" track.
+- **One-way scenes:** `--only_dir` ignores crossings in the other direction. It is a per-scene setting, not a better counter.
+
+### Results
+
+Reference crossings were logged for short windows (5 to 10 s) and the counter's crossings were matched to them
+(same direction, within 0.3 s).
+
+| Group | Clip | Window | Reference | Detected | Matched | Missed | Extra | Class correct |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Tuned on | test17 | 10-20 s | 18 | 18 | 16 | 2 | 2 | 15/16 |
+| Tuned on | test4 | 5-15 s | 20 | 15 | 15 | 5 | 0 | 15/15 |
+| Tuned on | test10 | 10-20 s | 22 | 18 | 17 | 5 | 1 | 17/17 |
+| Not tuned on | test6 | 1-6 s | 53 | 43 | 41 | 12 | 2 | 39/41 |
+| Not tuned on | test24 (standstill jam) | 2-7 s | 8 | 5 | 5 | 3 | 0 | 5/5 |
+| Fresh, logged before running the counter | test16 | 1-9 s | 12 | 13 | 12 | 0 | 1 | 12/12 |
+| Fresh, logged before running the counter | test25 | 10-20 s | 21 | 31 | 21 | 0 | 10 | 20/21 |
+
+Pooled over the seven windows: **127 of 154 reference crossings were found (82%)**, with 16 extra detections, 10 of them on test25.
+
+### How to read these numbers (limitations of the evaluation)
+
+- **The reference logs were produced by an AI agent from the raw videos, not by a human, and I did not independently verify them.** Treat all numbers as indicative.
+- Recall is measured against what the agent logged. Vehicles that were hard to see (for example motorcycles hidden between cars) may be absent from the log, so recall may be overstated.
+- For the three "tuned on" clips I did not record whether the logging agent could see the counter's output. Precision, class accuracy and timing for those windows should not be read as independent evidence. The two "fresh" clips were logged before the counter was run (as reported by the agent); their median time offset was 0.15 s, compared with 0.03 s on the tuned clips.
+- **test25:** all 10 extras are in one direction and include autorickshaws, a motorcycle and trucks, while the reference lists only cars. These are probably vehicles missing from the reference, so the 10 extras are not a reliable precision estimate. This was not checked.
+- Windows are 5 to 10 s long, there are 154 reference crossings in total, and there is one reference per clip, so one event moves a clip's recall by several points. No confidence intervals are given.
+- Settings were chosen by looking at the tuned windows. Compare "tuned on" and "not tuned on" rows accordingly.
+- The evaluation processed every frame. The hosted demo processes every 2nd frame to fit on a small CPU, and that setting was not evaluated.
+
+### Known failure cases
+
+- **Motorcycles hidden between cars or behind larger vehicles:** no detection at all (about 5 of 11 misses on test4, test10 and test17).
+- **Tailgating vehicles:** the track ID moves from the leading vehicle to the one behind it, and the second crossing is not counted.
+- **Vehicles that first appear next to the line** (for example emerging from behind a truck) do not have enough track history to count.
+- **Standstill congestion (test24):** the tracker produces spurious backward tracklets, and counts are unreliable.
+- **Class labels:** car and motorcycle are mostly right. Autorickshaw and truck are often confused with box-bodied vehicles (tempos, taxis, buses seen from behind), so per-class counts for those two are the least reliable. The total count is more trustworthy than the per-class split.
+
+### Ablation (frozen settings)
+
+| Variant | Setting | Effect |
+| :--- | :--- | :--- |
+| r0 | `--no_reset --min_age 5` | baseline |
+| r1 | `--no_reset --min_age 3` | test6: 3 fewer misses, 2 more extras |
+| r2 | `--min_age 5` (ID reset on) | no change beyond noise |
+| r3 | `--min_age 3` (ID reset on) | the frozen setting (defaults in `src/count_traffic.py`) |
+
+On the tuned clips the variants differed by at most one event, within noise, so the counter logic was frozen at r3.
+
+### Reproduce
+
+```
+python src/pick_geometry.py --video <clip>.mp4 --frame 300 --out configs/geometry_<clip>.json
+python src/count_traffic.py --video <clip>.mp4 --geometry configs/geometry_<clip>.json --window 10 20
+python src/run_all_counts.py v3
+```
+
+## API and demo
+
+The counter and detector are served as a FastAPI service with a Gradio demo. Add the live link here after deploying:
+`https://huggingface.co/spaces/<USER>/<SPACE>`.
+
+| Endpoint | What it does |
+| :--- | :--- |
+| `GET /health` | status, device and limits |
+| `POST /detect` | one image in (JPEG or PNG), detections out as JSON |
+| `POST /count` | starts a counting job on a short video and returns a `job_id` |
+| `GET /jobs/{job_id}` | job status, and the counts when done |
+| `GET /jobs/{job_id}/video` | annotated video (H.264 mp4) |
+| `GET /jobs/{job_id}/events` | every counted crossing as CSV |
+| `/demo` | Gradio UI: upload a clip, place the line, get counts |
+| `/docs` | interactive API documentation |
+
+```
+curl.exe -F "file=@clip.mp4" -F "line_y=0.5" -F "roi_top=0.25" http://localhost:7860/count
+curl.exe http://localhost:7860/jobs/<job_id>
+```
+
+Demo limits (set by environment variables): the first 10 s of a clip, 60 MB, every 2nd frame, CPU only, one video at a time.
+By default the counting line is horizontal; `to_plus` means moving down the image (toward the camera).
+
+```
+docker build -t traffic-demo .
+docker run --rm -p 7860:7860 traffic-demo
+```
